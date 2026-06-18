@@ -9,6 +9,12 @@ import { StructureViewer } from "./components/StructureViewer.jsx";
 import { SequenceStrip } from "./components/SequenceStrip.jsx";
 import { ScoreGauge } from "./components/ScoreGauge.jsx";
 import { VariantRow } from "./components/VariantRow.jsx";
+import { ScatterPlot } from "./components/ScatterPlot.jsx";
+
+const bg = T.paper;
+const fg = T.ink;
+const panelBg = "#FFFFFF";
+const border = T.paperDim;
 
 export default function App() {
   const { variants, error } = useVariantData();
@@ -19,11 +25,13 @@ export default function App() {
   const [minActivity1, setMinActivity1] = useState(0);
   const [minExpression, setMinExpression] = useState(0);
   const [sortKey, setSortKey] = useState("activity_2");
-  const [activeFeature, setActiveFeature] = useState("placer_score");
-  const [highlightAS, setHighlightAS] = useState(true);
-  const [theme, setTheme] = useState("light");
+  const [activeFeature, setActiveFeature] = useState("pet_msa_affinity");
+  const [selectedResidue, setSelectedResidue] = useState(null);
 
-  // Pick a default selection once data arrives.
+  // Reset residue selection when the active variant changes
+  React.useEffect(() => { setSelectedResidue(null); }, [selectedId]);
+
+  // Pick a default selection once data arrives
   React.useEffect(() => {
     if (variants && variants.length && !selectedId) {
       setSelectedId(variants[0].id);
@@ -48,6 +56,17 @@ export default function App() {
 
   const activeFeatureMeta = FEATURES.find((f) => f.key === activeFeature);
 
+  // Pre-compute per-feature value arrays once so percentileOf doesn't re-sort on every render
+  const featureValues = useMemo(() => {
+    if (!variants) return {};
+    const out = {};
+    FEATURES.forEach((f) => { out[f.key] = variants.map((v) => v[f.key]); });
+    return out;
+  }, [variants]);
+
+  const TABLE_LIMIT = 200;
+  const visibleRows = filtered.slice(0, TABLE_LIMIT);
+
   const downloadCsv = useCallback(() => {
     const headers = ["id", "organism", "activity_1", "activity_2", "expression"];
     const rows = filtered.map((v) => headers.map((h) => v[h]).join(","));
@@ -60,12 +79,6 @@ export default function App() {
     a.click();
     URL.revokeObjectURL(url);
   }, [filtered]);
-
-  const isDark = theme === "dark";
-  const bg = isDark ? T.ink : T.paper;
-  const fg = isDark ? T.paper : T.ink;
-  const panelBg = isDark ? "#10191D" : "#FFFFFF";
-  const border = isDark ? "rgba(247,245,239,0.12)" : T.paperDim;
 
   if (error) {
     return (
@@ -89,35 +102,34 @@ export default function App() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: bg, color: fg, fontFamily: "Inter, sans-serif", transition: "background 200ms ease, color 200ms ease" }}>
-      <header style={{ borderBottom: `2px solid ${fg}`, padding: "22px 28px 0" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 12 }}>
-          <div>
+    <div style={{ minHeight: "100vh", background: bg, color: fg, fontFamily: "Inter, sans-serif" }}>
+      <header style={{ borderBottom: `2px solid ${fg}`, padding: "22px 28px 14px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
+          <div style={{ maxWidth: 680 }}>
             <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 11, letterSpacing: 2, color: T.brass, textTransform: "uppercase", marginBottom: 4 }}>
               PETbusters · zero-shot track
             </div>
-            <h1 style={{ fontFamily: "Fraunces, Georgia, serif", fontSize: 34, fontWeight: 600, margin: 0, letterSpacing: -0.5 }}>
+            <h1 style={{ fontFamily: "Fraunces, Georgia, serif", fontSize: 34, fontWeight: 600, margin: "0 0 8px", letterSpacing: -0.5 }}>
               Variant Explorer
             </h1>
+            <p style={{ margin: 0, fontSize: 13, color: T.slate, lineHeight: 1.6 }}>
+              An interactive explorer for {variants.length} PETase sequence variants from the PETbusters zero-shot competition track.
+              Browse and filter by predicted catalysis and expression scores, inspect 3D structures residue by residue, and cross-correlate
+              biophysical features in the scatter plot below to spot trade-offs across the design space.
+            </p>
           </div>
-          <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-            <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 11.5, color: T.slate }}>
-              {variants.length} variants loaded
-            </div>
-            <button
-              onClick={() => setTheme(isDark ? "light" : "dark")}
-              style={{ border: `1px solid ${fg}`, background: "transparent", color: fg, borderRadius: 20, padding: "5px 14px", fontSize: 11.5, cursor: "pointer", fontFamily: "Inter, sans-serif" }}
-            >
-              {isDark ? "light mode" : "dark mode"}
-            </button>
+          <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 11.5, color: T.slate, paddingTop: 4 }}>
+            {variants.length} variants loaded
           </div>
         </div>
-        <div style={{ marginTop: 14, marginBottom: 10 }}>
+        <div style={{ marginTop: 14 }}>
           <TickRuler ticks={64} accent={false} />
         </div>
       </header>
 
       <main style={{ padding: "24px 28px 60px", display: "flex", gap: 24, flexWrap: "wrap" }}>
+
+        {/* ── Left panel: variant browser ── */}
         <section style={{ flex: "1 1 420px", minWidth: 380, maxWidth: 560 }}>
           <div style={{ fontFamily: "Fraunces, Georgia, serif", fontSize: 18, fontWeight: 600, marginBottom: 12, display: "flex", alignItems: "baseline", gap: 8 }}>
             Variant browser
@@ -155,7 +167,7 @@ export default function App() {
             ))}
             <button
               onClick={downloadCsv}
-              style={{ marginLeft: "auto", border: `1px solid ${T.brass}`, background: "transparent", color: isDark ? T.brass : "#8a6f1a", borderRadius: 14, padding: "3px 11px", fontSize: 11, cursor: "pointer", fontFamily: "Inter, sans-serif" }}
+              style={{ marginLeft: "auto", border: `1px solid ${T.brass}`, background: "transparent", color: "#8a6f1a", borderRadius: 14, padding: "3px 11px", fontSize: 11, cursor: "pointer", fontFamily: "Inter, sans-serif" }}
             >
               export CSV
             </button>
@@ -173,7 +185,7 @@ export default function App() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((v) => (
+                {visibleRows.map((v) => (
                   <VariantRow
                     key={v.id}
                     v={v}
@@ -183,14 +195,23 @@ export default function App() {
                     onCompareClick={() => setCompareId(v.id === compareId ? null : v.id)}
                   />
                 ))}
+                {filtered.length > TABLE_LIMIT && (
+                  <tr>
+                    <td colSpan={6} style={{ padding: "10px", textAlign: "center", fontSize: 11, color: T.slate, fontFamily: "Inter, sans-serif", borderTop: `1px solid ${border}` }}>
+                      Showing {TABLE_LIMIT} of {filtered.length} — use filters or search to narrow results
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
         </section>
 
+        {/* ── Right panel: selected variant detail ── */}
         <section style={{ flex: "2 1 600px", minWidth: 380 }}>
           {selected && (
             <>
+              {/* Variant header */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
                 <div>
                   <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 12, color: T.brass }}>{selected.id}</div>
@@ -198,39 +219,43 @@ export default function App() {
                 </div>
                 {compareVariant && (
                   <div style={{ fontSize: 11.5, fontFamily: "Inter, sans-serif", color: T.slate, border: `1px solid ${border}`, borderRadius: 6, padding: "6px 10px", background: panelBg }}>
-                    Comparing against <strong style={{ color: T.teal, fontFamily: "JetBrains Mono, monospace" }}>{compareVariant.id}</strong>{" "}
-                    <button onClick={() => setCompareId(null)} style={{ marginLeft: 8, border: "none", background: "none", color: T.rust, cursor: "pointer" }}>
-                      clear
-                    </button>
+                    Comparing against <strong style={{ color: T.teal, fontFamily: "JetBrains Mono, monospace" }}>{compareVariant.id}</strong>
+                    <button onClick={() => setCompareId(null)} style={{ marginLeft: 8, border: "none", background: "none", color: T.rust, cursor: "pointer" }}>clear</button>
                   </div>
                 )}
               </div>
 
+              {/* Score gauges */}
               <div style={{ display: "flex", gap: 20, flexWrap: "wrap", background: panelBg, border: `1px solid ${border}`, borderRadius: 10, padding: "18px 20px", marginBottom: 20 }}>
-                <ScoreGauge label="Catalysis · pH 5.5" value={selected.activity_1} fmt={(v) => v.toFixed(3)} percentile={percentileOf(selected.activity_1, variants.map((v) => v.activity_1))} accent={T.teal} />
-                <ScoreGauge label="Catalysis · pH 9" value={selected.activity_2} fmt={(v) => v.toFixed(3)} percentile={percentileOf(selected.activity_2, variants.map((v) => v.activity_2))} accent={T.tealLight} />
-                <ScoreGauge label="Expression" value={selected.expression} fmt={(v) => v.toFixed(3)} percentile={percentileOf(selected.expression, variants.map((v) => v.expression))} accent={T.rust} />
+                <ScoreGauge label="Catalysis · pH 5.5" value={selected.activity_1} fmt={(v) => v == null ? "n/a" : v.toFixed(3)} percentile={percentileOf(selected.activity_1, featureValues.activity_1 || [])} accent={T.teal} />
+                <ScoreGauge label="Catalysis · pH 9" value={selected.activity_2} fmt={(v) => v == null ? "n/a" : v.toFixed(3)} percentile={percentileOf(selected.activity_2, featureValues.activity_2 || [])} accent={T.tealLight} />
+                <ScoreGauge label="Expression" value={selected.expression} fmt={(v) => v == null ? "n/a" : v.toFixed(3)} percentile={percentileOf(selected.expression, featureValues.expression || [])} accent={T.rust} />
               </div>
 
+              {/* Structure viewer + sequence strip */}
               <div style={{ border: `1px solid ${border}`, borderRadius: 10, overflow: "hidden", marginBottom: 8 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", background: T.ink }}>
-                  <div style={{ fontFamily: "Fraunces, Georgia, serif", fontSize: 15, color: T.paper }}>Structure</div>
-                  <label style={{ fontSize: 11, color: T.paper, display: "flex", gap: 6, alignItems: "center", fontFamily: "Inter, sans-serif" }}>
-                    <input type="checkbox" checked={highlightAS} onChange={(e) => setHighlightAS(e.target.checked)} style={{ accentColor: T.brass }} />
-                    highlight catalytic triad
-                  </label>
-                </div>
-                <StructureViewer variant={selected} highlightActiveSite={highlightAS} />
-                <div style={{ background: T.ink, padding: "12px 16px 16px" }}>
-                  <SequenceStrip sequence={selected.sequence} />
+                <StructureViewer
+                  variant={selected}
+                  selectedResidue={selectedResidue}
+                  onResidueSelect={setSelectedResidue}
+                />
+                <div style={{ background: T.ink, borderTop: "1px solid rgba(247,245,239,0.08)" }}>
+                  <SequenceStrip
+                    sequence={selected.sequence}
+                    catS={selected.cat_S}
+                    catD={selected.cat_D}
+                    catH={selected.cat_H}
+                    selectedResidue={selectedResidue}
+                    onResidueSelect={setSelectedResidue}
+                  />
                 </div>
               </div>
               <div style={{ fontSize: 10.5, color: T.slate, fontFamily: "Inter, sans-serif", marginBottom: 22 }}>
-                Drag to rotate, scroll to zoom.
+                Drag to rotate · scroll to zoom · click atom or sequence residue to select
               </div>
 
+              {/* Feature inspector */}
               <div style={{ fontFamily: "Fraunces, Georgia, serif", fontSize: 18, fontWeight: 600, marginBottom: 12 }}>Feature inspector</div>
-
               <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
                 <div style={{ flex: "1 1 260px", display: "flex", flexDirection: "column", gap: 6, maxHeight: 460, overflowY: "auto" }}>
                   {FEATURE_GROUPS.map((group) => (
@@ -240,7 +265,7 @@ export default function App() {
                       </div>
                       {FEATURES.filter((f) => f.group === group).map((f) => {
                         const isActive = f.key === activeFeature;
-                        const pct = percentileOf(selected[f.key], variants.map((v) => v[f.key]));
+                        const pct = percentileOf(selected[f.key], featureValues[f.key] || []);
                         return (
                           <button
                             key={f.key}
@@ -287,14 +312,30 @@ export default function App() {
                         <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "4px 0", fontFamily: "JetBrains Mono, monospace" }}>
                           <span style={{ color: T.slate, fontFamily: "Inter, sans-serif" }}>{k}</span>
                           <span>
-                            <strong style={{ color: T.brass }}>{selected[k].toFixed(3)}</strong>
+                            <strong style={{ color: T.brass }}>{selected[k]?.toFixed(3) ?? "n/a"}</strong>
                             {"  vs  "}
-                            <strong style={{ color: T.slate }}>{compareVariant[k].toFixed(3)}</strong>
+                            <strong style={{ color: T.slate }}>{compareVariant[k]?.toFixed(3) ?? "n/a"}</strong>
                           </span>
                         </div>
                       ))}
                     </div>
                   )}
+                </div>
+              </div>
+
+              {/* Scatter plot */}
+              <div style={{ marginTop: 28 }}>
+                <div style={{ fontFamily: "Fraunces, Georgia, serif", fontSize: 18, fontWeight: 600, marginBottom: 4 }}>Feature cross-correlation</div>
+                <div style={{ fontSize: 12, color: T.slate, fontFamily: "Inter, sans-serif", marginBottom: 14, lineHeight: 1.5 }}>
+                  Each dot is one variant. Click any dot to open it in the viewer above.
+                </div>
+                <div style={{ border: `1px solid ${border}`, borderRadius: 10, padding: "18px 20px", background: panelBg }}>
+                  <ScatterPlot
+                    allVariants={variants}
+                    selectedId={selectedId}
+                    compareId={compareId}
+                    onSelectVariant={setSelectedId}
+                  />
                 </div>
               </div>
             </>
