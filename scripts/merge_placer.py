@@ -9,6 +9,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VARIANTS_JSON = os.path.join(ROOT, "public/data/variants.json")
 PLACER_CSV = "/Users/benjaminwehnert/align_competition/report/data/PLACER_score_df.csv"
 ANNOTATED_CSV = "/Users/benjaminwehnert/align_competition/report/data/annotated_df_11.csv"
+SAP_SCALE = 10  # store SAP*10 as integer (0-100+ range)
 
 # Load PLACER scores keyed by Variant_ID
 placer = {}
@@ -42,11 +43,26 @@ with open(ANNOTATED_CSV) as f:
             except Exception:
                 return None
 
+            # per_residue_sap: dict {resi: value} → compact int array (SAP*10, clamped 0-255)
+        sap_raw = row.get("per_residue_sap", "").strip()
+        sap_arr = None
+        try:
+            sap_dict = ast.literal_eval(sap_raw) if sap_raw else {}
+            if sap_dict:
+                max_key = max(sap_dict.keys())
+                sap_arr = [
+                    min(255, round(sap_dict.get(k, 0) * SAP_SCALE))
+                    for k in range(1, max_key + 1)
+                ]
+        except Exception:
+            pass
+
         annotated.append({
             "cat_S": maybe_int(row.get("cat-S", "")),
             "cat_D": maybe_int(row.get("cat-D", "")),
             "cat_H": maybe_int(row.get("cat-H", "")),
             "as_filddisco_positions": pos,
+            "sap_arr": sap_arr,
         })
 
 print(f"Loaded {len(annotated)} annotated rows")
@@ -66,6 +82,7 @@ for i, v in enumerate(variants):
         v["cat_D"] = ann["cat_D"]
         v["cat_H"] = ann["cat_H"]
         v["as_filddisco_positions"] = ann["as_filddisco_positions"]
+        v["sap_arr"] = ann["sap_arr"]
 
     # PLACER CSV uses Variant_ID 0-indexed
     if i in placer:

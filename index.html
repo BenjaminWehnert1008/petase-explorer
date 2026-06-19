@@ -11,7 +11,22 @@
     />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="initial-loader" style="padding:40px;font-family:Inter,sans-serif;color:#5B6B6B;font-size:14px">
+        Loading variant data…
+      </div>
+    </div>
+    <script>
+      window.onerror = function(msg, src, line, col, err) {
+        var d = document.getElementById("root");
+        if (d) d.innerHTML =
+          '<div style="padding:40px;font-family:monospace;background:#F7F5EF;min-height:100vh;color:#B6452C">' +
+          '<h2 style="font-family:Georgia,serif;color:#B6452C">JavaScript error</h2>' +
+          '<pre style="background:#fff;border:1px solid #EDE9DE;border-radius:6px;padding:16px;font-size:12px;overflow-x:auto;color:#0B1418">' +
+          (msg + "\n\n" + src + ":" + line + "\n\n" + (err && err.stack ? err.stack : "")) +
+          '</pre></div>';
+      };
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

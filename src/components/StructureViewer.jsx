@@ -28,14 +28,23 @@ function kdColor(resn) {
   return `rgb(${r},${g},${b})`;
 }
 
-// Map dG_score_per_res to a blue→yellow→red color
-// Typical range ≈ -5 (stable) to 0 (unstable)
-function stabilityColor(dG) {
-  const t = Math.max(0, Math.min(1, (dG + 5) / 5)); // 0 = stable, 1 = unstable
-  // blue (0,0,255) → white (255,255,255) → red (255,0,0)
-  const r = Math.round(t < 0.5 ? 2 * t * 255 : 255);
-  const g = Math.round(t < 0.5 ? 2 * t * 180 : 180 * (2 - 2 * t));
-  const b = Math.round(t < 0.5 ? 255 : (2 - 2 * t) * 255);
+// Per-residue electrostatic charge color (from sequence single-letter code)
+const CHARGE_COLOR = {
+  D: "#e05c5c", E: "#e05c5c",  // negative (red)
+  K: "#5c9be0", R: "#5c9be0",  // positive (blue)
+  H: "#9bc0e0",                 // weakly basic (light blue)
+};
+function chargeColor(aa) {
+  return CHARGE_COLOR[aa] || "#aaaaaa";
+}
+
+// Per-residue aggregation propensity color from sap_arr (SAP×10 integers)
+// gray (#aaa) → orange → red as SAP increases
+function sapColor(val) {
+  const t = Math.min(1, val / 80); // normalize: SAP=8 → t=1
+  const r = Math.round(170 + 70 * t);
+  const g = Math.round(170 - 80 * t);
+  const b = Math.round(170 - 130 * t);
   return `rgb(${r},${g},${b})`;
 }
 
@@ -70,7 +79,7 @@ export function StructureViewer({ variant, selectedResidue, onResidueSelect }) {
   const [viewStyle, setViewStyle] = useState("cartoon");
   const [showSideChains, setShowSideChains] = useState(false);
 
-  // Coloring mode: null = default teal, "triad" | "hydrophob" | "ss" | "stability"
+  // Coloring mode: null = default teal, "triad" | "hydrophob" | "charge" | "agg"
   const [colorMode, setColorMode] = useState(null);
 
   const [hovered, setHovered] = useState(null);
@@ -149,28 +158,27 @@ export function StructureViewer({ variant, selectedResidue, onResidueSelect }) {
         });
       }
 
-    } else if (colorMode === "ss") {
-      // Secondary-structure coloring (3Dmol DSSP from coordinates)
-      if (viewStyle === "stick") {
-        viewer.setStyle({}, { stick: { colorscheme: "ssPyMol", radius: 0.15 } });
-      } else {
-        const ss = { cartoon: { colorscheme: "ssPyMol", ...baseCartoon } };
-        if (baseStick) ss.stick = { ...baseStick, colorscheme: "ssPyMol" };
-        viewer.setStyle({}, ss);
-      }
+    } else if (colorMode === "charge" && variant?.sequence) {
+      // Per-residue electrostatic charge (D/E=red, K/R=blue, neutral=gray)
+      viewer.setStyle({}, { cartoon: { color: "#aaaaaa", ...baseCartoon } });
+      variant.sequence.split("").forEach((aa, i) => {
+        const col = chargeColor(aa);
+        if (col === "#aaaaaa") return; // skip neutrals (already set)
+        const style = { cartoon: { color: col, ...baseCartoon } };
+        if (baseStick) style.stick = { ...baseStick, color: col };
+        viewer.setStyle({ resi: i + 1 }, style);
+      });
 
-    } else if (colorMode === "stability" && variant?.dG_score_per_res != null) {
-      // Uniform color based on global dG_score_per_res
-      const col = stabilityColor(variant.dG_score_per_res);
-      if (viewStyle === "stick") {
-        viewer.setStyle({}, { stick: { color: col, radius: 0.15 } });
-      } else if (viewStyle === "sphere") {
-        viewer.setStyle({}, { sphere: { color: col, scale: 0.32 } });
-      } else {
-        const s = { cartoon: { color: col, ...baseCartoon } };
-        if (baseStick) s.stick = { ...baseStick, color: col };
-        viewer.setStyle({}, s);
-      }
+    } else if (colorMode === "agg" && variant?.sap_arr?.length) {
+      // Per-residue aggregation propensity (gray → orange → red)
+      viewer.setStyle({}, { cartoon: { color: "#aaaaaa", ...baseCartoon } });
+      variant.sap_arr.forEach((val, i) => {
+        if (val === 0) return;
+        const col = sapColor(val);
+        const style = { cartoon: { color: col, ...baseCartoon } };
+        if (baseStick) style.stick = { ...baseStick, color: col };
+        viewer.setStyle({ resi: i + 1 }, style);
+      });
 
     } else {
       // Default teal coloring
@@ -214,8 +222,7 @@ export function StructureViewer({ variant, selectedResidue, onResidueSelect }) {
 
   // ── Derived state for UI labels ──────────────────────────────────────────────
   const hasCatTriad = !!(variant?.cat_S && variant?.cat_D && variant?.cat_H);
-  const hasStability = variant?.dG_score_per_res != null;
-  const dGColor = hasStability ? stabilityColor(variant.dG_score_per_res) : null;
+  const hasAgg = !!(variant?.sap_arr?.length);
 
   const toggleMode = (mode) => setColorMode((prev) => (prev === mode ? null : mode));
 
@@ -226,16 +233,17 @@ export function StructureViewer({ variant, selectedResidue, onResidueSelect }) {
       { color: "rgb(150,60,150)", label: "Neutral" },
       { color: "rgb(30,60,230)",  label: "Hydrophilic (−4.5)" },
     ],
-    ss: [
-      { color: "#e05c5c", label: "α-Helix" },
-      { color: "#e0c85c", label: "β-Sheet" },
-      { color: "#c0c0c0", label: "Loop / coil" },
+    charge: [
+      { color: "#e05c5c", label: "Negative (D, E)" },
+      { color: "#aaaaaa", label: "Neutral" },
+      { color: "#9bc0e0", label: "His (H)" },
+      { color: "#5c9be0", label: "Positive (K, R)" },
     ],
-    stability: hasStability ? [
-      { color: "rgb(0,0,255)",   label: "Stable (ΔG ≈ −5)" },
-      { color: "rgb(255,180,0)", label: "Moderate" },
-      { color: "rgb(255,0,0)",   label: "Unstable (ΔG ≈ 0)" },
-    ] : [],
+    agg: [
+      { color: "#aaaaaa", label: "Low SAP" },
+      { color: sapColor(40), label: "Moderate" },
+      { color: sapColor(80), label: "High (sticky)" },
+    ],
   };
   const activeLegend = colorMode && colorMode !== "triad" ? legends[colorMode] : null;
 
@@ -279,7 +287,7 @@ export function StructureViewer({ variant, selectedResidue, onResidueSelect }) {
         <button
           onClick={() => hasCatTriad && toggleMode("triad")}
           style={ctrlBtn(colorMode === "triad", !hasCatTriad)}
-          title={hasCatTriad ? "Highlight Ser/Asp/His catalytic triad" : "Catalytic triad residue indices not available in this dataset"}
+          title={hasCatTriad ? "Highlight Ser/Asp/His catalytic triad" : "Catalytic triad residue indices not available"}
         >
           Catalytic Triad {!hasCatTriad && <span style={{ opacity: 0.5, fontSize: 9 }}>(n/a)</span>}
         </button>
@@ -288,29 +296,27 @@ export function StructureViewer({ variant, selectedResidue, onResidueSelect }) {
         <button
           onClick={() => toggleMode("hydrophob")}
           style={ctrlBtn(colorMode === "hydrophob", false)}
-          title="Color each residue by Kyte-Doolittle hydrophobicity (red = hydrophobic, blue = hydrophilic)"
+          title="Per-residue Kyte-Doolittle hydrophobicity (red = hydrophobic, blue = hydrophilic)"
         >
           Hydrophobicity
         </button>
 
-        {/* 3. Secondary Structure */}
+        {/* 3. Electrostatics */}
         <button
-          onClick={() => toggleMode("ss")}
-          style={ctrlBtn(colorMode === "ss", false)}
-          title="Color by secondary structure computed from 3D coordinates (α-helix / β-sheet / loop)"
+          onClick={() => toggleMode("charge")}
+          style={ctrlBtn(colorMode === "charge", false)}
+          title="Per-residue charge: D/E = negative (red), K/R = positive (blue), neutral = gray"
         >
-          2° Structure
+          Electrostatics
         </button>
 
-        {/* 4. ΔG Stability */}
+        {/* 4. Aggregation Risk (Rosetta SAP) */}
         <button
-          onClick={() => hasStability && toggleMode("stability")}
-          style={ctrlBtn(colorMode === "stability", !hasStability)}
-          title={hasStability ? `dG/residue = ${variant.dG_score_per_res?.toFixed(3)} kcal/mol — backbone colored blue (stable) → red (unstable)` : "No stability data available"}
+          onClick={() => hasAgg && toggleMode("agg")}
+          style={ctrlBtn(colorMode === "agg", !hasAgg)}
+          title="Per-residue Spatial Aggregation Propensity (Rosetta SAP): gray = low, red = high aggregation risk"
         >
-          ΔG Stability {hasStability && (
-            <span style={{ fontSize: 9, opacity: 0.75 }}>{variant.dG_score_per_res?.toFixed(2)}</span>
-          )}
+          Aggregation Risk
         </button>
 
         {colorMode && colorMode !== "triad" && (

@@ -15,7 +15,7 @@ import { T } from "../theme.js";
 export function DistributionPlot({ featureKey, allVariants, selected, compareVariant, width = 420, height = 170 }) {
   const values = allVariants
     .map((v) => v[featureKey])
-    .filter((v) => v !== -1 && !Number.isNaN(v) && v !== undefined);
+    .filter((v) => v != null && v !== -1 && !Number.isNaN(v));
 
   if (!values.length) return null;
 
