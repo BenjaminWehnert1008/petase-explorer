@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback } from "react";
 import { T } from "./theme.js";
 import { FEATURES, FEATURE_GROUPS } from "./features.js";
 import { percentileOf } from "./utils.js";
-import { useVariantData } from "./useVariantData.js";
+import { useVariantData, fetchSapData } from "./useVariantData.js";
 import { TickRuler } from "./components/TickRuler.jsx";
 import { DistributionPlot } from "./components/DistributionPlot.jsx";
 import { StructureViewer } from "./components/StructureViewer.jsx";
@@ -27,6 +27,12 @@ export default function App() {
   const [sortKey, setSortKey] = useState("activity_2");
   const [activeFeature, setActiveFeature] = useState("pet_msa_affinity");
   const [selectedResidue, setSelectedResidue] = useState(null);
+  const [sapData, setSapData] = useState(null);
+
+  const loadSapData = useCallback(() => {
+    if (sapData) return;
+    fetchSapData().then(setSapData).catch(console.error);
+  }, [sapData]);
 
   // Reset residue selection when the active variant changes
   React.useEffect(() => { setSelectedResidue(null); }, [selectedId]);
@@ -238,6 +244,8 @@ export default function App() {
                   variant={selected}
                   selectedResidue={selectedResidue}
                   onResidueSelect={setSelectedResidue}
+                  sapData={sapData}
+                  onLoadSapData={loadSapData}
                 />
                 <div style={{ background: T.ink, borderTop: "1px solid rgba(247,245,239,0.08)" }}>
                   <SequenceStrip

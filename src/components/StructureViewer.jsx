@@ -66,7 +66,7 @@ function ctrlBtn(active, disabled) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function StructureViewer({ variant, selectedResidue, onResidueSelect }) {
+export function StructureViewer({ variant, selectedResidue, onResidueSelect, sapData, onLoadSapData }) {
   const ready = useInjectedScript("https://3Dmol.org/build/3Dmol-min.js", () => !!window.$3Dmol);
   const containerRef = useRef(null);
   const viewerRef = useRef(null);
@@ -169,16 +169,19 @@ export function StructureViewer({ variant, selectedResidue, onResidueSelect }) {
         viewer.setStyle({ resi: i + 1 }, style);
       });
 
-    } else if (colorMode === "agg" && variant?.sap_arr?.length) {
-      // Per-residue aggregation propensity (gray → orange → red)
+    } else if (colorMode === "agg") {
+      // Per-residue aggregation propensity (gray → orange → red, Rosetta SAP)
+      const sapArr = sapData?.[variant?.id];
       viewer.setStyle({}, { cartoon: { color: "#aaaaaa", ...baseCartoon } });
-      variant.sap_arr.forEach((val, i) => {
-        if (val === 0) return;
-        const col = sapColor(val);
-        const style = { cartoon: { color: col, ...baseCartoon } };
-        if (baseStick) style.stick = { ...baseStick, color: col };
-        viewer.setStyle({ resi: i + 1 }, style);
-      });
+      if (sapArr) {
+        sapArr.forEach((val, i) => {
+          if (val === 0) return;
+          const col = sapColor(val);
+          const style = { cartoon: { color: col, ...baseCartoon } };
+          if (baseStick) style.stick = { ...baseStick, color: col };
+          viewer.setStyle({ resi: i + 1 }, style);
+        });
+      }
 
     } else {
       // Default teal coloring
@@ -218,11 +221,12 @@ export function StructureViewer({ variant, selectedResidue, onResidueSelect }) {
     }
 
     viewer.render();
-  }, [viewStyle, showSideChains, colorMode, variant, selectedResidue, pdbText]);
+  }, [viewStyle, showSideChains, colorMode, variant, selectedResidue, pdbText, sapData]);
 
   // ── Derived state for UI labels ──────────────────────────────────────────────
   const hasCatTriad = !!(variant?.cat_S && variant?.cat_D && variant?.cat_H);
-  const hasAgg = !!(variant?.sap_arr?.length);
+  const sapArr = sapData?.[variant?.id];
+  const sapLoading = colorMode === "agg" && !sapArr;
 
   const toggleMode = (mode) => setColorMode((prev) => (prev === mode ? null : mode));
 
@@ -239,11 +243,11 @@ export function StructureViewer({ variant, selectedResidue, onResidueSelect }) {
       { color: "#9bc0e0", label: "His (H)" },
       { color: "#5c9be0", label: "Positive (K, R)" },
     ],
-    agg: [
+    agg: sapArr ? [
       { color: "#aaaaaa", label: "Low SAP" },
       { color: sapColor(40), label: "Moderate" },
       { color: sapColor(80), label: "High (sticky)" },
-    ],
+    ] : [],
   };
   const activeLegend = colorMode && colorMode !== "triad" ? legends[colorMode] : null;
 
@@ -310,13 +314,13 @@ export function StructureViewer({ variant, selectedResidue, onResidueSelect }) {
           Electrostatics
         </button>
 
-        {/* 4. Aggregation Risk (Rosetta SAP) */}
+        {/* 4. Aggregation Risk (Rosetta SAP, lazy-loaded) */}
         <button
-          onClick={() => hasAgg && toggleMode("agg")}
-          style={ctrlBtn(colorMode === "agg", !hasAgg)}
-          title="Per-residue Spatial Aggregation Propensity (Rosetta SAP): gray = low, red = high aggregation risk"
+          onClick={() => { onLoadSapData?.(); toggleMode("agg"); }}
+          style={ctrlBtn(colorMode === "agg", false)}
+          title="Per-residue Spatial Aggregation Propensity (Rosetta SAP): gray = low, red = high risk"
         >
-          Aggregation Risk
+          {sapLoading ? "Loading SAP…" : "Aggregation Risk"}
         </button>
 
         {colorMode && colorMode !== "triad" && (

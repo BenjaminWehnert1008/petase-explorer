@@ -34,10 +34,16 @@ export function useVariantData() {
 }
 
 // fetchPdbText: fetches the raw PDB file text for a given variant id.
-// Real deployment: one file per variant at /pdb/{id}.pdb (see
-// scripts/convert_data.js and the README for how these get there).
 export async function fetchPdbText(pdbFile) {
   const res = await fetch(import.meta.env.BASE_URL + pdbFile);
   if (!res.ok) throw new Error("Failed to load " + pdbFile + " (" + res.status + ")");
   return res.text();
+}
+
+// fetchSapData: lazy-loads per-residue SAP arrays ({variant_id: [int...]}).
+// Kept separate from variants.json to keep initial load fast (~4 MB vs ~7 MB).
+export async function fetchSapData() {
+  const res = await fetch(import.meta.env.BASE_URL + "data/sap_data.json");
+  if (!res.ok) throw new Error("sap_data.json " + res.status);
+  return res.json();
 }
